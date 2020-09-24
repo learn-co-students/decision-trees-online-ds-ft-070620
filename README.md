@@ -1,33 +1,24 @@
-
 # Decision Trees
 
-# Agenda
+Decision trees are a highly interpretable<sup>1</sup>, easy-to-overfit type of model. They are best for modeling datasets where the relationship between the features and the target can be represented well with "if-this-then-this" type of statements. They will be the basis for one of the most popular ensemble methods: random forests.
 
-1. FSM and Metric Discussion
+A decision tree is a machine learning model that works by *partitioning* our sample space in a hierarchical way.
+
+How do we partition the space? The key idea is that some attributes provide more *information* than others when trying to make a decision.
+
+<sup>1</sup>_"Highly interpretable" matters if you need to be able to explain how the model decided to classify a given record in a given way. Simpler models tend to be more interpretable._
+
+## Agenda
+
+1. Motivating Example
 2. Decision Trees at a High Level
-3. ASM (Attribute Selection Methods): Entropy/Information Gain and Gini
+    - ASM (Attribute Selection Methods): Entropy/Information Gain and Gini
+3. Decision Trees in SciKit-Learn
 4. Issues with Decision Trees: Overfitting, sensitivity to training data, greediness
 5. Feature Importances
-6. Grid Search
+6. Appendix: Grid Search
 
-
-```python
-import pandas as pd
-import numpy as np
-
-# This is always a good idea
-%load_ext autoreload
-%autoreload 2
-
-import warnings
-warnings.filterwarnings('ignore')
-
-import os
-import sys
-module_path = os.path.abspath(os.path.join(os.pardir, os.pardir))
-if module_path not in sys.path:
-    sys.path.append(module_path)
-```
+<img src='./img/titanic_tree.png' width=600/>
 
 
 ```python
@@ -35,20 +26,25 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-from src.student_caller import one_random_student, pairs
+
+# This is always a good idea if we are using custom Python modules
+%load_ext autoreload
+%autoreload 2
 
 import warnings
 warnings.filterwarnings('ignore')
-
-mccalister = ['Adam', 'Amanda','Chum', 'Dann',
- 'Jacob', 'Jason', 'Johnhoy', 'Karim',
-'Leana','Luluva', 'Matt', 'Maximilian','Syd' ]
 ```
 
-# FSM and Metric Discussion
+## 1. Motivating Example
+### Austin Animal Shelter Dataset
+
+Let's say you are provided with this data on outcomes for animals in the Austim animal shelter system. You are trying to predict the `outcome_type`
 
 
 ```python
+# You could use something like this code to get live data from the Austin animal
+# shelter; we are just going to use a CSV that was collected earlier
+
 # import requests
 # import json
 
@@ -58,31 +54,14 @@ mccalister = ['Adam', 'Amanda','Chum', 'Dann',
 
 
 ```python
-animal_shelter = pd.read_csv('data/austin.csv')
-```
-
-
-```python
-animal_shelter.set_index('Unnamed: 0', inplace=True)
+animal_shelter = pd.read_csv('data/austin.csv', index_col=0)
 ```
 
 
 ```python
 from src.shelter_preprocess import preprocess_df
-```
-
-
-```python
-animal_shelter.age_upon_outcome.isna().sum()
-animal_shelter.head()
-```
-
-
-```python
 animal_shelter.dropna(subset=['age_upon_outcome'], inplace=True )
 df = preprocess_df(animal_shelter)
-
-df.shape
 ```
 
 
@@ -90,101 +69,110 @@ df.shape
 df.head()
 ```
 
+### Decision Trees by Hand
+
+Without using any Python tools, we could try to develop a decision tree to determine the outcome for a given animal. Let's start with a simplified view of 10 samples from our dataset.
+
 
 ```python
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.model_selection import train_test_split
+example_sample = df.sample(10, random_state=7)
+example_sample
+```
+
+We want to predict whether `adoption` is a 1 or a 0. Can we perfectly represent this with "if-then" statements?
+
+#### Split on Dogs/Non-Dogs
+
+Let's start with "if the animal is a dog" to split into 2 groups
+
+
+```python
+dogs = example_sample[example_sample["is_dog"]==1]
+dogs
 ```
 
 
 ```python
-X = df.drop(['adoption'], axis=1)
-y = df.adoption
+non_dogs = example_sample[example_sample["is_dog"]==0]
+non_dogs
+```
 
-X_train, X_test, y_train, y_test = train_test_split(X,y, random_state=42, test_size = .2)
-X_train.head()
+#### Assessment of Decision Tree After One Split
 
+Initially we had 10 animals, 50% of which were adopted, 50% of which weren't
+
+Now we have `dogs`, of which 4/7 were adopted, and `non_dogs`, of which 1/3 were adopted. If we guessed "adoption" for all dogs, and "not adoption" for all non-dogs, we would be correct the majority of the time.
+
+Let's do another split
+
+#### Split on Female
+
+Let's split each of the existing groups into 2 groups
+
+
+```python
+female_dogs = dogs[dogs["is_female"]==1]
+female_dogs
 ```
 
 
 ```python
-X_t, X_val, y_t, y_val = train_test_split(X_train,y_train, random_state=42, test_size = .25)
-X_t.head()
+male_dogs = dogs[dogs["is_female"]==0]
+male_dogs
 ```
 
 
 ```python
-dt = DecisionTreeClassifier()
-dt.fit(X_t, y_t)
-y_hat_val = dt.predict(X_val)
-print(f'Training Score: {dt.score(X_t, y_t)}')
-print(f'Val      Score: {dt.score(X_val, y_val)}')
+female_non_dogs = non_dogs[non_dogs["is_female"]==1]
+female_non_dogs
 ```
 
 
 ```python
-y_val.value_counts()
+male_non_dogs = non_dogs[non_dogs["is_female"]==0]
+male_non_dogs
 ```
 
+#### Assessment of Decision Tree After Two Splits
 
-```python
-np.unique(y_hat_val, return_counts=True)
-```
-
-
-```python
-from src.confusion import plot_confusion_matrix
-from sklearn.metrics import confusion_matrix, f1_score, roc_auc_score, accuracy_score, recall_score, precision_score
-plot_confusion_matrix(confusion_matrix(y_val, y_hat_val),classes=['no_adoption', 'adoption'])
-```
-
-
-```python
-print(f'Accuracy Score: {accuracy_score(y_val, y_hat_val)}')
-print('-------------------')
-print(f'Precision score: {precision_score(y_val, y_hat_val)}')
-print('-------------------')
-print(f'Recall Score: {recall_score(y_val, y_hat_val)}')
-print('-------------------')
-print(f'f1_score: {f1_score(y_val, y_hat_val)}')
-print('-------------------')
-print(f'roc_auc_score{roc_auc_score(y_val, y_hat_val)}')
+Now we have four categories, based on two splits:
 
 ```
-
-If you were building a model for the animal shelter, which metric would you focus on?
-
-# 2. Decision Trees at a High Level
-
-The **CART algorithm** is structured as a sequence of questions to try and split up the different observations into their own groups. The result of these questions is a tree like structure where the ends are terminal nodes at which point there are no more questions.  A simple example of a decision tree is as follows:
-
-<img src='./img/titanic_tree.png' width=600/>
-
-A decision tree is a machine learning model that works by partitioning our sample space in a hierarchical way.
-
-How do we partition the space? The key idea is that some attributes provide more information than others when trying to make a decision.
-
-# In Pairs (private message): 
-    
-You are a triage nurse at a hospital being inundated with patients who believe they are suffering from coronavirus.  You neeed to quickly assess which patients are most likely to have coronavirus, and separate them from the rest of the patients.      
-
-Based on what you know of the virus, create a list of a few questions and a flow chart to help you to quickly decide which patients should be separated.  
-
-
-```python
-from src.student_caller import pairs
-
-pairs(mccalister)
+if (dog):
+  --> if (female): ADOPTED     (4/5 adopted)
+  --> if (male):   NOT ADOPTED (0/2 adopted)
+if (not dog):
+  --> if (female): ADOPTED     (1/2 adopted)
+  --> if (male):   NOT ADOPTED (0/1 adopted)
 ```
 
-## High level of how the Decision Tree algorithm works
+So if we guessed the majority class for each category each time (randomly choosing a tie-breaker), we would guess:
 
-* Select the best attribute using Attribute Selection Measures (Gini/Entropy) to split the records.
-* Make that attribute a decision node and break the dataset into smaller subsets.
-* Starts tree building by repeating this process recursively for each child until one of these conditions will match:
-    * You have reached a pure split: the leaf has only 1 class
-    * There are no more remaining attributes to split on.
-    * There are no more instances.
+ - All female dogs are adopted
+ - All male dogs are not adopted
+ - All female non-dogs are adopted
+ - All male non-dogs are not adopted
+
+...which would mean we got 8 right, 2 wrong on the dataset overall, i.e. an 80% accuracy.  Pretty good for a pretty simple model! Definitely a lot easier than hand-calculating a logistic regression of kNN model.
+
+#### Reflection
+
+If we wanted to keep going, to be able to get to 100% accuracy, we would need some kind of formula that used `age_in_days` to get the right answers for those last two. But rather than get into that, let's think about what we just did, and whether it was optimal.
+
+Was splitting on dog/non-dog the right choice for our first split?
+
+But how would my partition be *best* split? And how do I really know that the second split is better than the first? Can I do better than intuition here?  
+
+## 2. Decision Trees at a High Level
+
+### High level of how the Decision Tree algorithm works
+
+ - Select the best attribute using Attribute Selection Measures (Gini/Entropy) to split the records
+ -  Make that attribute a decision node and break the dataset into smaller subsets
+ -  Starts tree building by repeating this process recursively for each child until one of these conditions will match:
+    - You have reached a pure split: the leaf has only 1 class
+    - There are no more remaining attributes to split on
+    - There are no more instances
 
 ### Important Terminology related to Decision Trees
 Let’s look at the basic terminologies used with Decision trees:
@@ -199,79 +187,9 @@ Let’s look at the basic terminologies used with Decision trees:
 
 <img src='./img/decision_leaf.webp' width=600 />
 
+### Entropy/Information Gain and Gini
 
-```python
-example_sample = df.sample(10, random_state=7)
-example_sample.drop('age_in_days',axis=1, inplace=True)
-example_sample.reset_index(inplace=True, drop=True)
-example_sample.head(10)
-```
-
-## Partitioning
-
-I partition my data by asking a question about the independent variables. The goal is to ask the right questions in the right order so that the resultant groups are "pure" with respect to the dependent variable. More on this below!
-
-Suppose, for example, that I choose:
-
-### Is the animal a dog?
-
-This would divide my data into two groups:
-
-- Group 1 (Dog = 0):
-
-data points: 1,6,7
-
-- Group 2 (Dog = 1):
-
-data points:  0,2,3,4,5,8,9
-
-
-#### Key Question: How are the values of the target distributed in this group?
-
-In Group 1, I have: adoption, no adoption, no adoption
-
-In Group 2, I have, in order: adoption, adoption, adoption, no adoption, no adoption, no adoption, adoption
-
-This seems like an ok split:   
-  - The first group is majority no adoptions (2/3), so it suggests cats are unlikely to get adopted.   
-  - The second group has captured most of the adoptions, but there is only a slight majority of adoptions over no adoptions (4/7)
-
-Would a different question split our data more effectively? Let's try:
-
-### Is the animal female?
-
-Let's look at our splits:
-
-- Group 1 (Female = 0):
-
-data points: 5,7,8
-
-- Group 2 (Female = 1):
-
-
-data points: 0,1,2,3,4,6,9
-
-
-In Group 1, I have: no adoption, no adoption, no adoption  
-In Group 2, I have: adoption, adoption, adoption, adoption, no adoption, no adoption, adoption
-
-That seems better:  
-  - Group 1 is a pure group, no adoption when sex is male
-  - Group 2 has 5/7 adoptions.
-  
-This seems like a much better split.
-
-So a (very simple!) model based on the above sample predicts:  
-(i) A female animal will be adopted  
-(ii) A male animal will not be adopted  
-
-would perform fairly well.  
-
-But how would my partition be *best* split? And how do I really know that the second split is better than the first? Can I do better than intuition here?  
-
-# 3. Entropy/Information Gain and Gini
-
-The goal is to have our ultimate classes be fully "ordered" (for a binary dependent variable, we'd have the 1's in one group and the 0's in the other). So one way to assess the value of a split is to measure how *disordered* our groups are, and there is a notion of *entropy* that measures precisely this.
+The goal is to have our ultimate categories be fully "ordered" (for a binary dependent variable, we'd have the 1's in one group and the 0's in the other). So one way to assess the value of a split is to measure how *disordered* our groups are, and there is a notion of *entropy* that measures precisely this.
 
 The entropy of the whole dataset is given by:
 
@@ -284,6 +202,8 @@ where $p_i$ is the probability of belonging to the $i$th group, where $n$ is the
 <img src='./img/Entropy_mapped.png' width=600/>
 
 To repeat, in the present case we have only two groups of interest: adoption and no adoption.
+
+#### Entropy for Entire Sample (10 Pets)
 
 5 out of 10 were adopted and 5 out of 10 were not adopted, so **these are the relevant probabilities** for our calculation of entropy.
 
@@ -298,27 +218,18 @@ Let's use the ``numpy's`` `log2()` function to calculate this:
 (-.5) * np.log2(.5) - (.5) * np.log2(.5)
 ```
 
-Now, on your own, calculate the entropy of the training set.
+That is a very disordered collection! Which makes sense, since it's 50/50 adopted/not adopted
 
-
-```python
-one_random_student(mccalister)
-
-# your code here
-```
+#### Entropy for Dog/Non-Dog Split
 
 To calculate the entropy of a *split*, we're going to want to calculate the entropy of each of the groups made by the split, and then calculate a weighted average of those groups' entropies––weighted, that is, by the size of the groups. Let's calculate the entropy of the split produced by our "is our animal a dog" question:
 
 Group 1 (not a dog): adoption, no adoption, no adoption
 
-
-
 $E_{g1} = - 2/3 * \log_2(2/3) - 1/3 * \log_2(1/3)$. 
 
 Group 2: adoption, adoption, adoption, no adoption, no adoption, no adoption, adoption  
 $E_{g2} = -\frac{3}{7} * \log_2\left(\frac{3}{7}\right) - \frac{4}{7} * \log_2\left(\frac{4}{7}\right)$.
-
-
 
 
 
@@ -341,7 +252,11 @@ E_split_d = pgc + pgd
 E_split_d
 ```
 
-Compare that to the male/female question:
+So, we have made some improvement from the 1.0 entropy of the original, now we are getting 0.96
+
+#### Entropy for Male/Female Split
+
+Compare that to the male/female question (if we asked that first, instead of doing two splits on the dogs/non-dogs then male/female):
 
 
 ```python
@@ -354,8 +269,6 @@ print(Egm)
 
 Egf =(-2/7)*np.log2(2/7) - (5/7)*np.log2(5/7) 
 print(Egf)
-
-
 ```
 
 Weighted sum
@@ -369,22 +282,23 @@ E_split_f = pgm + pgf
 E_split_f
 ```
 
+This entropy is 0.6, whereas the other split had 0.96
+
+#### Choosing the Best Information Gain
+
 For a given split, the **information gain** is simply the entropy of the parent group less the entropy of the split.
 
 
 ```python
 total_entropy_sample = (-5/10)*np.log2(5/10) - (5/10) * np.log2(5/10)
 
-
 # Information gain, dog or cat
-
 ig_d = total_entropy_sample - E_split_d
 print(f"Information gain dog/cat: {ig_d}")
 
+# Information gain, male or female
 ig_f = total_entropy_sample - E_split_f
 print(f"Information gain male/female: {ig_f}")
-
-
 ```
 
 For a given parent, then, we maximize our model's performance by *minimizing* the split's entropy.
@@ -396,34 +310,9 @@ What we'd like to do then is:
 
 In practice there are far too many splits for it to be practical for a person to calculate all these different entropies ...
 
-... but we can make computers do these calculations for us!
+... but we can make computers do these calculations for us! (we'll get to that in the next section)
 
-
-```python
-dt = DecisionTreeClassifier(criterion='entropy')
-X = example_sample.drop('adoption', axis=1)
-y = example_sample.adoption
-dtree = dt.fit(X,y)
-df.__dict__
-
-```
-
-
-```python
-from sklearn.externals.six import StringIO  
-from IPython.display import Image  
-from sklearn.tree import export_graphviz
-import pydotplus
-dot_data = StringIO()
-export_graphviz(dtree, out_file=dot_data,  
-                filled=True, rounded=True,
-                special_characters=True, 
-               feature_names=X.columns)
-graph = pydotplus.graph_from_dot_data(dot_data.getvalue())  
-Image(graph.create_png())
-```
-
-## Gini Impurity
+### Gini Impurity
 
 An alternative metric to entropy comes from the work of Corrado Gini. The Gini Impurity is defined as:
 
@@ -433,61 +322,91 @@ where, again, $p_i$ is the probability of belonging to the $i$th group.
 
 **Gini Impurity will always be between 0 and 0.5. The closer to 0.5, the more disordered your group.**
 
-# Pairs (3 minutes)
+You can find a quick comparison of using Gini Impurity rather than entropy for the same splits in the `solution` branch
 
-- Calculate the Gini score for both the dog split and the female split.  
-- Decide which is best, i.e. which to split on first
-- Change the hyperparameter to Gini, and print the tree like above to confirm your work
-
-Group 1 (not a dog): adoption, no adoption, no adoption  
-Group 2 (dog): adoption, adoption, adoption, no adoption, no adoption, no adoption, adoption  
-
-In Group 1 (male), I have: no adoption, no adoption, no adoption  
-In Group 2 (female), I have: adoption, adoption, adoption, adoption, no adoption, no adoption, adoption
-
-# Caveat
+### Impurity Metric Caveat
 
 
 As found in *Introduction to Data Mining* by Tan et. al:
 
 `Studies have shown that the choice of impurity measure has little effect on the performance of decision tree induction algorithms. This is because many impurity measures are quite consistent with each other [...]. Indeed, the strategy used to prune the tree has a greater impact on the final tree than the choice of impurity measure.`
 
-# 4. Issues with Decision Trees
+(We'll get into more detail on "pruning" and why you want to do it in the "Issues with Decision Trees" section)
 
-### Decision trees are prone to overfitting
+## 3. Decision Trees in SciKit-Learn
 
-Let's add back in age_in_days and refit the tree
+Having gone into all of that math detail...we actually won't need to implement that ourselves, in practice.  Instead, we can use the handy class in SciKit-Learn, called `DecisionTreeClassifier`
 
+(There is also a `DecisionTreeRegressor` which doesn't use entropy or Gini to measure the utility of the split, and instead uses a technique to reduce the standard deviation. More details [here](https://www.saedsayad.com/decision_tree_reg.htm) if you are curious.)
 
-
-```python
-
-animal_shelter.dropna(subset=['age_upon_outcome'], inplace=True )
-df = preprocess_df(animal_shelter)
-df.shape
-```
+#### Imports
 
 
 ```python
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+```
 
-dt = DecisionTreeClassifier(criterion='entropy')
+#### Data Preparation
+
+
+```python
 X = df.drop(['adoption'], axis=1)
 y = df.adoption
-X.head()
+
+# Split into train and test
+X_train, X_test, y_train, y_test = train_test_split(X,y, random_state=42, test_size = .2)
+X_train.head()
 ```
 
 
 ```python
-from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42, test_size=.25)
-X_t, X_val, y_t, y_val = train_test_split(X_train, y_train, random_state=42, test_size=.25)
+# Further split the train for validation purposes
+X_t, X_val, y_t, y_val = train_test_split(X_train,y_train, random_state=42, test_size = .25)
+X_t.head()
+```
+
+#### Creating, Fitting, and Scoring the Model
+
+
+```python
+dt = DecisionTreeClassifier()
+dt.fit(X_t, y_t)
+y_hat_val = dt.predict(X_val)
+print(f'Training Score: {dt.score(X_t, y_t)}')
+print(f'Val      Score: {dt.score(X_val, y_val)}')
+```
+
+#### Additional Model Evaluation Metrics
+
+
+```python
+from src.confusion import plot_confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score, roc_auc_score, accuracy_score, recall_score, precision_score
+plot_confusion_matrix(confusion_matrix(y_val, y_hat_val),classes=['no_adoption', 'adoption'])
 ```
 
 
 ```python
-dt.fit(X_t,y_t)
+print(f'Accuracy Score: {accuracy_score(y_val, y_hat_val)}')
+print('-------------------')
+print(f'Precision score: {precision_score(y_val, y_hat_val)}')
+print('-------------------')
+print(f'Recall Score: {recall_score(y_val, y_hat_val)}')
+print('-------------------')
+print(f'f1_score: {f1_score(y_val, y_hat_val)}')
+print('-------------------')
+print(f'roc_auc_score{roc_auc_score(y_val, y_hat_val)}')
+```
 
+#### Visualizations
+
+
+```python
+from sklearn.tree import plot_tree
+
+fig, ax = plt.subplots(figsize=(12, 8))
+plot_tree(dt, ax=ax);
 ```
 
 
@@ -504,21 +423,25 @@ graph = pydotplus.graph_from_dot_data(dot_data.getvalue())
 Image(graph.create_png())
 ```
 
-That is a good visual to go represent an overfit tree.  Let's look at the accuracy.
+## 4. Issues with Decision Trees
+
+### Decision trees are prone to overfitting
+
+The image above is a good visual to represent an overfit tree.  Let's look at the accuracy.
 
 
 ```python
-# That is massive
 dt.score(X_t,y_t)
 ```
 
-That super high accuracy score is a telltale sign of an overfit model.
+That super high accuracy score is a telltale sign of an overfit model. Let's compare it to the validation set:
 
 
 ```python
-# That's a bit dropoff
 dt.score(X_val, y_val)
 ```
+
+That's a big drop-off!
 
 ### Bias-Variance with Decision Trees
 
@@ -527,8 +450,7 @@ The CART algorithm will repeatedly partition data into smaller and smaller subse
 This results in low-bias, high variance trees.
 
 
-## Stopping Criterion - Pruning Parameters
-
+### Stopping Criterion - Pruning Parameters
 
 The recursive binary splitting procedure described above needs to know when to stop splitting as it works its way down the tree with the training data.
 
@@ -544,8 +466,7 @@ Set the depth of the tree to 3, 5, 10 depending after verification on test data
 **min_impurity_split :**
 A node will split if its impurity is above the threshold, otherwise it is a leaf.
 
-
-Let's try limiting the depth:
+Let's try limiting the depth (by default the limit is `None`, i.e. unlimited depth):
 
 
 ```python
@@ -553,7 +474,6 @@ dt = DecisionTreeClassifier(max_depth=5)
 dt.fit(X_t, y_t)
 print(dt.score(X_t, y_t))
 print(dt.score(X_val, y_val))
-
 ```
 
 
@@ -564,7 +484,7 @@ print(dt.score(X_t, y_t))
 print(dt.score(X_val, y_val))
 ```
 
-Let's try limiting minimum samples per leaf:
+Let's try limiting minimum samples per leaf (by default the limit is 1, i.e. a leaf node can have as few as 1 sample in it):
 
 
 ```python
@@ -582,27 +502,21 @@ print(dt.score(X_t, y_t))
 print(dt.score(X_val, y_val))
 ```
 
-## Decision trees are very senstitive to training data
+### Decision trees are very sensitive to training data
 
-Let's fit two trees that differ only by 1 sample, and look at the difference.
+Let's fit two trees that differ only by 10 samples, and look at the difference.
 
 
 ```python
 dt = DecisionTreeClassifier(max_depth=5)
-X_t_sample_1 = X_t.sample(100, random_state=42)
+X_t_sample_1 = X_t.sample(100, random_state=1)
 y_t_sample_1 = y_t[X_t_sample_1.index]
 
 dt.fit(X_t_sample_1, y_t_sample_1)
-
-
 ```
 
 
 ```python
-from sklearn.externals.six import StringIO  
-from IPython.display import Image  
-from sklearn.tree import export_graphviz
-import pydotplus
 dot_data = StringIO()
 export_graphviz(dt, out_file=dot_data,  
                 filled=True, rounded=True,
@@ -615,19 +529,14 @@ Image(graph.create_png())
 
 ```python
 dt = DecisionTreeClassifier(max_depth=5)
-X_t_sample_2 = X_t_sample_1.sample(99, random_state=8)
+X_t_sample_2 = X_t_sample_1.sample(90, random_state=42)
 y_t_sample_2 = y_t[X_t_sample_2.index]
 
 dt.fit(X_t_sample_2, y_t_sample_2)
-
 ```
 
 
 ```python
-from sklearn.externals.six import StringIO  
-from IPython.display import Image  
-from sklearn.tree import export_graphviz
-import pydotplus
 dot_data = StringIO()
 export_graphviz(dt, out_file=dot_data,  
                 filled=True, rounded=True,
@@ -637,19 +546,19 @@ graph = pydotplus.graph_from_dot_data(dot_data.getvalue())
 Image(graph.create_png())
 ```
 
-## Greediness
+### Greediness
 
 Decision trees will always split on the features with the most advantageous split. 
 
-Take the above example.  The algorithm never uses the is_dog or is_female columns. This could obscure valuable information held in those variables.  
+Take the above example.  The algorithm is almost exclusively using the `age_in_days` feature, potentially obscuring more-valuable information in `is_female` or `is_dog` 
 
 We will see how to overcome greediness with Random Forests.
 
 
 
-## Feature Importances
+## 5. Feature Importances
 
-The fitted tree has an attribute called `ct.feature_importances_`. What does this mean? Roughly, the importance (or "Gini importance") of a feature is a sort of weighted average of the impurity decrease at internal nodes that make use of the feature. The weighting comes from the number of samples that depend on the relevant nodes.
+The fitted tree has an attribute called `dt.feature_importances_`. What does this mean? Roughly, the importance (or "Gini importance") of a feature is a sort of weighted average of the impurity decrease at internal nodes that make use of the feature. The weighting comes from the number of samples that depend on the relevant nodes.
 
 > The importance of a feature is computed as the (normalized) total reduction of the criterion brought by that feature. It is also known as the Gini importance. [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeClassifier.html#sklearn.tree.DecisionTreeClassifier.feature_importances_)
 
@@ -660,7 +569,6 @@ dt.fit(X_t, y_t)
 
 for fi, feature in zip(dt.feature_importances_, X_t.columns):
     print(fi, feature)
-
 ```
 
 More on feature importances [here](https://towardsdatascience.com/the-mathematics-of-decision-trees-random-forest-and-feature-importance-in-scikit-learn-and-spark-f2861df67e3)
@@ -678,31 +586,22 @@ Decision Tree is a white box type of ML algorithm. It shares internal decision-m
 
 #### Cons
 - Sensitive to noisy data. It can overfit noisy data.
-- The small variation(or variance) in data can result in the different decision tree. This can be reduced by bagging and boosting algorithms.
-- Decision trees are biased with imbalance dataset, so it is recommended that balance out the dataset before creating the decision tree.
+- The small variation (or variance) in data can result in the different decision tree. This can be reduced by bagging and boosting algorithms.
+- Decision trees are biased with imbalanced datasets, so it is recommended that you balance out the dataset before creating the decision tree.
 
-# 6. Grid Search
+## 6. Appendix: Grid Search
 
-
-```python
-X = df.drop(['adoption'], axis=1)
-y = df.adoption
-
-X_train, X_test, y_train, y_test = train_test_split(X,y, random_state=42, test_size = .2)
-```
-
-
-```python
-param_grid = [
-  {'criterion': ['gini', 'entropy'], 
-   'max_leaf_nodes': list(range(1,10)),
-   'max_depth': list(range(2,10))} 
-             ]
-```
+Because there are multiple techniques for pruning a decision tree, each with their own impacts on bias vs. variance, you'll often want to use a grid search to find the best combination of parameters.  Look in the `solution` branch for a filled-in example
 
 
 ```python
 from sklearn.model_selection import GridSearchCV
+```
+
+
+```python
+# Replace None with appropriate code
+param_grid = None
 ```
 
 
@@ -719,4 +618,14 @@ search.best_estimator_
 
 ```python
 search.best_estimator_.score(X_train, y_train)
+```
+
+
+```python
+search.best_estimator_.score(X_test, y_test)
+```
+
+
+```python
+
 ```
